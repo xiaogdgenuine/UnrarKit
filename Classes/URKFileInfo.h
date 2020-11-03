@@ -147,9 +147,9 @@ typedef NS_ENUM(NSUInteger, URKHostOS) {
 @property (readonly, assign) URKHostOS hostOS;
 
 /**
- *  Relative offset to file record's header
+ *  Closest offset to file record's header
  */
-@property (assign) int64_t relativeOffsetToHeader;
+@property (assign) int64_t closestOffsetToHeader;
 
 /**
  *  Returns a URKFileInfo instance for the given extended header data
