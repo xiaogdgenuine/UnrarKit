@@ -130,10 +130,10 @@ static NSURL *originalLargeArchiveURL;
     [super tearDown];
 }
 
-- (void)recordIssue:(XCTIssue *)issue {
-    self.testFailed = YES;
-    [super recordIssue:issue];
-}
+//- (void)recordIssue:(XCTIssue *)issue {
+//    self.testFailed = YES;
+//    [super recordIssue:issue];
+//}
 
 
 

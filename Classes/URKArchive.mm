@@ -13,8 +13,19 @@
 
 RarHppIgnore
 #import "rar.hpp"
+
 #pragma clang diagnostic pop
 
+struct DataSet
+{
+    CommandData Cmd;
+    Archive Arc;
+    CmdExtract Extract;
+    int OpenMode;
+    int HeaderSize;
+
+    DataSet():Arc(&Cmd),Extract(&Cmd) {};
+};
 
 NSString *URKErrorDomain = @"URKErrorDomain";
 
@@ -899,7 +910,7 @@ NS_DESIGNATED_INITIALIZER
     return success;
 }
 
-- (BOOL)extractBufferedDataFromFile:(NSString *)filePath
+- (BOOL)extractBufferedDataFromFile:(URKFileInfo *)fileInfo
                               error:(NSError * __autoreleasing *)error
                              action:(void(^)(NSData *dataChunk, CGFloat percentDecompressed))action
 {
@@ -914,32 +925,12 @@ NS_DESIGNATED_INITIALIZER
     BOOL success = [self performActionWithArchiveOpen:^(NSError **innerError) {
         URKCreateActivity("Performing action");
 
+        DataSet *Data=(DataSet *)welf.rarFile;
+        // Ask unrar seek to the relative offset of entry's header
+        Data->Arc.Seek(fileInfo.relativeOffsetToHeader, SEEK_SET);
         int RHCode = 0, PFCode = 0;
-        URKFileInfo *fileInfo;
-
-        URKLogInfo("Looping through files, looking for %{public}@...", filePath);
-        
-        while ([welf readHeader:&RHCode info:&fileInfo] == URKReadHeaderLoopActionContinueReading) {
-            if ([welf headerContainsErrors:innerError]) {
-                URKLogDebug("Header contains error")
-                return;
-            }
-
-            if ([fileInfo.filename isEqualToString:filePath]) {
-                URKLogDebug("Found desired file");
-                break;
-            }
-            else {
-                URKLogDebug("Skipping file...");
-                PFCode = RARProcessFile(welf.rarFile, RAR_SKIP, NULL, NULL);
-                if (![welf didReturnSuccessfully:PFCode]) {
-                    NSString *errorName = nil;
-                    [welf assignError:innerError code:(NSInteger)PFCode errorName:&errorName];
-                    URKLogError("Failed to skip file: %{public}@ (%d)", errorName, PFCode);
-                    return;
-                }
-            }
-        }
+        // Now we are at the correct offset, the next header must be entry's header, so we only need to read once.
+        RHCode = RARReadHeaderEx(welf.rarFile, welf.header);
         
         long long totalBytes = fileInfo.uncompressedSize;
         progress.totalUnitCount = totalBytes;
@@ -1001,7 +992,7 @@ NS_DESIGNATED_INITIALIZER
         *error = actionError;
 
         if (actionError) {
-            URKLogError("Error reading buffered data from file\nfilePath: %{public}@\nerror: %{public}@", filePath, actionError);
+            URKLogError("Error reading buffered data from file\nfilePath: %{public}@\nerror: %{public}@", fileInfo.filename, actionError);
         }
     }
 
@@ -1726,9 +1717,13 @@ int CALLBACK AllowCancellationCallbackProc(UINT msg, long UserData, long P1, lon
     NSAssert(info != NULL, @"info argument is required");
 
     URKLogDebug("Reading RAR header");
+    DataSet *Data=(DataSet *)self.rarFile;
+    int64 curBlockPos = Data->Arc.CurBlockPos;
     *returnCode = RARReadHeaderEx(self.rarFile, self.header);
     URKLogDebug("Reading file info from RAR header");
     *info = [URKFileInfo fileInfo:self.header];
+    // Save the Current block position as an relative offset to entry's header
+    (*info).relativeOffsetToHeader = curBlockPos;
     URKLogDebug("RARReadHeaderEx returned %d", *returnCode);
 
     URKReadHeaderLoopAction result;

@@ -209,6 +209,7 @@ int PASCAL RARReadHeader(HANDLE hArcData,struct RARHeaderData *D)
 int PASCAL RARReadHeaderEx(HANDLE hArcData,struct RARHeaderDataEx *D)
 {
   DataSet *Data=(DataSet *)hArcData;
+    printf("CurBlockPos %lld", Data->Arc.CurBlockPos);
   try
   {
     if ((Data->HeaderSize=(int)Data->Arc.SearchBlock(HEAD_FILE))<=0)

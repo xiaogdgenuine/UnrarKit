@@ -14,6 +14,17 @@
 
 @implementation ExtractBufferedDataTests
 
+- (URKFileInfo *)getFileInfoByPath:(URKArchive *)archive
+                          filePath:(NSString *)filePath
+{
+    NSError *innerError = nil;
+    NSArray *filesInArchive = [archive listFileInfo:&innerError];
+    NSPredicate *bPredicate = [NSPredicate predicateWithFormat:@"SELF.filename ==[c] %@", filePath];
+    URKFileInfo *fileInfo = [filesInArchive filteredArrayUsingPredicate:bPredicate].firstObject;
+
+    return fileInfo;
+}
+
 - (void)testExtractBufferedData
 {
     NSURL *archiveURL = self.testFileURLs[@"Test Archive.rar"];
@@ -22,7 +33,8 @@
     
     NSError *error = nil;
     NSMutableData *reconstructedFile = [NSMutableData data];
-    BOOL success = [archive extractBufferedDataFromFile:extractedFile
+    URKFileInfo *fileInfo = [self getFileInfoByPath:archive filePath:@"Test File B.jpg"];
+    BOOL success = [archive extractBufferedDataFromFile:fileInfo
                                                   error:&error
                                                  action:
                     ^(NSData *dataChunk, CGFloat percentDecompressed) {
