@@ -929,8 +929,32 @@ NS_DESIGNATED_INITIALIZER
         // Ask unrar seek to the relative offset of entry's header
         Data->Arc.Seek(fileInfo.relativeOffsetToHeader, SEEK_SET);
         int RHCode = 0, PFCode = 0;
-        // Now we are at the correct offset, the next header must be entry's header, so we only need to read once.
-        RHCode = RARReadHeaderEx(welf.rarFile, welf.header);
+        URKLogInfo("Looping through files, looking for %{public}@...", fileInfo.filename);
+
+        while ((RHCode = RARReadHeaderEx(welf.rarFile, welf.header)) == ERAR_SUCCESS) {
+            if ([self headerContainsErrors:innerError]) {
+                URKLogDebug("Header contains error")
+                return;
+            }
+
+            NSLog(@"Getting correct header again... %@", fileInfo.filename);
+            URKLogDebug("Getting file info from header");
+            URKFileInfo *info = [URKFileInfo fileInfo:welf.header];
+
+            if ([info.filename isEqualToString:fileInfo.filename]) {
+                URKLogDebug("Found desired file");
+                break;
+            }
+            else {
+                URKLogDebug("Skipping file...");
+                if ((PFCode = RARProcessFile(welf.rarFile, RAR_SKIP, NULL, NULL)) != 0) {
+                    NSString *errorName = nil;
+                    [self assignError:innerError code:(NSInteger)PFCode errorName:&errorName];
+                    URKLogError("Failed to skip file: %{public}@ (%d)", errorName, PFCode);
+                    return;
+                }
+            }
+        }
         
         long long totalBytes = fileInfo.uncompressedSize;
         progress.totalUnitCount = totalBytes;
