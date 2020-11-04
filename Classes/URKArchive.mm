@@ -630,7 +630,7 @@ NS_DESIGNATED_INITIALIZER
 {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    return [self extractDataFromFile:fileInfo.filename progress:nil error:error];
+    return [self extractDataFromFileInfo:fileInfo progress:nil error:error];
 #pragma clang diagnostic pop
 }
 
@@ -638,7 +638,7 @@ NS_DESIGNATED_INITIALIZER
                progress:(void (^)(CGFloat percentDecompressed))progressBlock
                   error:(NSError * __autoreleasing *)error
 {
-    return [self extractDataFromFile:fileInfo.filename progress:progressBlock error:error];
+    return [self extractDataFromFileInfo:fileInfo progress:progressBlock error:error];
 }
 
 - (NSData *)extractDataFromFile:(NSString *)filePath
@@ -649,6 +649,89 @@ NS_DESIGNATED_INITIALIZER
     return [self extractDataFromFile:filePath progress:nil error:error];
 #pragma clang diagnostic pop
 }
+
+- (NSData *)extractDataFromFileInfo:(URKFileInfo *)fileInfo
+                       progress:(void (^)(CGFloat percentDecompressed))progressBlock
+                          error:(NSError * __autoreleasing *)error
+{
+    URKCreateActivity("Extracting Data from File");
+
+    NSProgress *progress = [self beginProgressOperation:0];
+
+    __block NSData *result = nil;
+    __weak URKArchive *welf = self;
+
+    BOOL success = [self performActionWithArchiveOpen:^(NSError **innerError) {
+        URKCreateActivity("Performing Extraction");
+
+        int PFCode = 0;
+        DataSet *Data=(DataSet *)welf.rarFile;
+        // Ask unrar seek to the closest offset of entry's header record
+        Data->Arc.Seek(fileInfo.closestOffsetToHeader, SEEK_SET);
+
+        URKFileInfo *targetFile;
+        // Just call "RARReadHeaderEx" few more times then we should be able to locate the corresponding header.
+        // At most of time only 1 to 3 lookups is required, so it will be fast.
+        [welf locateFileInfoByFilePath:fileInfo.filename fileInfo:&targetFile innerError:innerError];
+
+        NSMutableData *fileData = [NSMutableData dataWithCapacity:(NSUInteger)fileInfo.uncompressedSize];
+        CGFloat totalBytes = targetFile.uncompressedSize;
+        progress.totalUnitCount = totalBytes;
+        __block long long bytesRead = 0;
+
+        if (progressBlock) {
+            progressBlock(0.0);
+        }
+
+        BOOL (^bufferedReadBlock)(NSData*) = ^BOOL(NSData *dataChunk) {
+            URKLogDebug("Appending buffered data (%lu bytes)", (unsigned long)dataChunk.length);
+            [fileData appendData:dataChunk];
+            progress.completedUnitCount += dataChunk.length;
+
+            bytesRead += dataChunk.length;
+
+            if (progressBlock) {
+                progressBlock(bytesRead / totalBytes);
+            }
+
+            if (progress.isCancelled) {
+                URKLogInfo("Cancellation initiated");
+                return NO;
+            }
+
+            return YES;
+        };
+        RARSetCallback(welf.rarFile, BufferedReadCallbackProc, (long)bufferedReadBlock);
+
+        URKLogInfo("Processing file...");
+        PFCode = RARProcessFile(welf.rarFile, RAR_TEST, NULL, NULL);
+
+        RARSetCallback(welf.rarFile, NULL, NULL);
+
+        if (progress.isCancelled) {
+            NSString *errorName = nil;
+            [welf assignError:innerError code:URKErrorCodeUserCancelled errorName:&errorName];
+            URKLogInfo("Returning nil data from extraction due to user cancellation: %{public}@", errorName);
+            return;
+        }
+
+        if (![welf didReturnSuccessfully:PFCode]) {
+            NSString *errorName = nil;
+            [welf assignError:innerError code:(NSInteger)PFCode errorName:&errorName];
+            URKLogError("Error extracting file data: %{public}@ (%d)", errorName, PFCode);
+            return;
+        }
+
+        result = [NSData dataWithData:fileData];
+    } inMode:RAR_OM_EXTRACT error:error];
+
+    if (!success) {
+        return nil;
+    }
+
+    return result;
+}
+
 
 - (NSData *)extractDataFromFile:(NSString *)filePath
                        progress:(void (^)(CGFloat percentDecompressed))progressBlock
@@ -722,21 +805,21 @@ NS_DESIGNATED_INITIALIZER
             if (progressBlock) {
                 progressBlock(bytesRead / totalBytes);
             }
-            
+
             if (progress.isCancelled) {
                 URKLogInfo("Cancellation initiated");
                 return NO;
             }
-            
+
             return YES;
         };
         RARSetCallback(welf.rarFile, BufferedReadCallbackProc, (long)bufferedReadBlock);
 
         URKLogInfo("Processing file...");
         PFCode = RARProcessFile(welf.rarFile, RAR_TEST, NULL, NULL);
-        
+
         RARSetCallback(welf.rarFile, NULL, NULL);
-        
+
         if (progress.isCancelled) {
             NSString *errorName = nil;
             [welf assignError:innerError code:URKErrorCodeUserCancelled errorName:&errorName];
@@ -1058,7 +1141,6 @@ NS_DESIGNATED_INITIALIZER
         DataSet *Data=(DataSet *)welf.rarFile;
         // Ask unrar seek to the closest offset of entry's header record
         Data->Arc.Seek(fileInfo.closestOffsetToHeader, SEEK_SET);
-        URKLogInfo("Looping through files, looking for %{public}@...", fileInfo.filename);
 
         URKFileInfo *targetFile;
         // Just call "RARReadHeaderEx" few more times then we should be able to locate the corresponding header.
